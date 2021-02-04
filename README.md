@@ -108,3 +108,14 @@ $ bsondump /home/thaskell/mongodumparchive.gz.dump/oplog.bson 2> /dev/null | jq 
   }
 }
 ```
+
+Build
+=====
+Install go 1.15
+```
+$ mkdir -p $GOPATH/src/github.com
+$ cd $GOPATH/src/github.com
+$ git clone git@github.com:thaskell/mongoarchivereader.git
+$ cd mongoarchivereader
+$ go build main/mongoarchivereader.go
+```
