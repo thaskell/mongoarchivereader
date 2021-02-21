@@ -2,11 +2,13 @@ package mongoarchivereader
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
+
 	"github.com/mongodb/mongo-tools-common/archive"
 	"github.com/mongodb/mongo-tools-common/log"
 	"github.com/mongodb/mongo-tools/mongorestore"
-	"path/filepath"
-	"strings"
+	"github.com/pkg/errors"
 )
 
 type namespace struct {
@@ -20,27 +22,32 @@ func (ns *namespace) String() string {
 	return fmt.Sprintf("%s.%s", ns.DB, ns.Collection)
 }
 
-func (mongoarchive *MongoArchive) createIntent(file archive.DirLike) error {
+func (a *Archive) createIntent(file archive.DirLike) error {
 	log.Logvf(log.DebugHigh, "processing %s", file.Path())
-	collection, fileType, err := mongoarchive.getInfoFromFile(file.Path())
+	collection, fileType, err := a.getInfoFromFile(file.Path())
 	if err != nil {
-		return fmt.Errorf("couldn't get information about %s: %v", file.Path(), err)
+		return errors.Wrapf(err, "failed to get information about %q", file.Path())
 	}
 
-	sourceNS := namespace{file.Parent().Name(), collection}
+	sourceNS := namespace{
+		DB:         file.Parent().Name(),
+		Collection: collection,
+	}
+
 	log.Logvf(log.DebugHigh, "source NS %s", sourceNS)
 
 	switch fileType {
 	case mongorestore.BSONFileType:
-		mongoarchive.processBSON(sourceNS, file)
+		a.processBSON(sourceNS, file)
 	case mongorestore.MetadataFileType:
-		mongoarchive.processMetadata(sourceNS, file)
+		a.processMetadata(sourceNS, file)
 	}
+
 	return nil
 }
 
 // Returns the name of the collection and the type of file it is, both parsed from the filename
-func (mongoarchive *MongoArchive) getInfoFromFile(filename string) (string, mongorestore.FileType, error) {
+func (a *Archive) getInfoFromFile(filename string) (string, mongorestore.FileType, error) {
 	baseFileName := filepath.Base(filename)
 	var collName string
 

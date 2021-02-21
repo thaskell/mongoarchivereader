@@ -4,13 +4,15 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
-	"github.com/mongodb/mongo-tools-common/util"
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/mongodb/mongo-tools-common/util"
+	"github.com/pkg/errors"
 )
 
-func (mongoarchive *MongoArchive) outputPath(dbName, colName string) string {
+func (a *Archive) outputPath(dbName, colName string) string {
 	// taken from https://github.com/mongodb/mongo-tools/blob/100.2.1/mongodump/prepare.go#L199-L211
 	// Encode a new output path for collection names that would result in a file name greater
 	// than 255 bytes long. This includes the longest possible file extension: .metadata.json.gz
@@ -26,7 +28,7 @@ func (mongoarchive *MongoArchive) outputPath(dbName, colName string) string {
 		escapedColName = colNameTruncated + "%24" + colNameHashBase64
 	}
 
-	return filepath.Join(mongoarchive.Options.Out, dbName, escapedColName)
+	return filepath.Join(a.Options.Out, dbName, escapedColName)
 }
 
 type restoreFile struct {
@@ -34,20 +36,23 @@ type restoreFile struct {
 	path string
 }
 
+const restoreDirPerm = 0x755
+
 // Create the file to be restored and any directories required that are in it's path
-func (restoreFile *restoreFile) Open() error {
-	if restoreFile.path == "" {
-		return fmt.Errorf("no metadata path supplied")
-	}
-	err := os.MkdirAll(filepath.Dir(restoreFile.path), os.ModeDir|os.ModePerm)
-	if err != nil {
-		return fmt.Errorf("error creating directory for metadata file `%s`: %v",
-			filepath.Dir(restoreFile.path), err)
+func (rf *restoreFile) Open() error {
+	if rf.path == "" {
+		return fmt.Errorf("metadata path must not be empty")
 	}
 
-	restoreFile.WriteCloser, err = os.Create(restoreFile.path)
-	if err != nil {
-		return fmt.Errorf("error creating metadata file `%s`: %v", restoreFile.path, err)
+	if err := os.MkdirAll(filepath.Dir(rf.path), os.ModeDir|restoreDirPerm); err != nil {
+		return errors.Wrapf(err, "failed to create directory for metadata file %q", filepath.Dir(rf.path))
 	}
+
+	wc, err := os.Create(rf.path)
+	if err != nil {
+		return errors.Wrapf(err, "failed to metadata file %q", rf.path)
+	}
+	rf.WriteCloser = wc
+
 	return nil
 }
