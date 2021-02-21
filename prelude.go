@@ -1,61 +1,60 @@
 package mongoarchivereader
 
 import (
-	"fmt"
 	"github.com/mongodb/mongo-tools-common/archive"
 	"github.com/mongodb/mongo-tools-common/log"
+	"github.com/pkg/errors"
 )
 
 type PreludeFiles []archive.DirLike
 
 // Iterate over the contents of the prelude and return all the files found
-func (mongoarchive *MongoArchive) GetFilesFromPrelude(prelude *archive.PreludeExplorer) (PreludeFiles, error) {
+func (a *Archive) GetFilesFromPrelude(prelude *archive.PreludeExplorer) (PreludeFiles, error) {
 	var files PreludeFiles
 	base, err := prelude.ReadDir()
 	if err != nil {
-		return PreludeFiles{}, fmt.Errorf("couldn't read from %s: %v", prelude.Name(), err)
+		return nil, errors.Wrapf(err, "failed to read from %q", prelude.Name())
 	}
 	for _, baseEntry := range base {
-		if baseEntry.Name() == "" {
-			log.Logv(log.DebugLow, "entry in archive has no name, skipping")
-			continue
-		}
-		if baseEntry.IsDir() {
-			baseEntryContent, err := baseEntry.ReadDir()
+		switch {
+		case baseEntry.Name() == "":
+			// todo: checking for this case is probably unnecessary now, with the switch
+			log.Logvf(log.DebugLow, "entry %q in archive has no name, skipping", baseEntry.Path())
+
+		case baseEntry.IsDir():
+			entries, err := baseEntry.ReadDir()
 			if err != nil {
-				return PreludeFiles{}, fmt.Errorf("couldn't read from %s: %v", prelude.Name(), err)
+				return nil, errors.Wrapf(err, "failed to read %q", prelude.Name())
 			}
-			for _, entry := range baseEntryContent {
-				if entry.IsDir() {
-					log.Logvf(log.DebugLow, "%s shouldn't contain a directory but %s was found, skipping", baseEntry.Name(), entry.Name())
-					continue
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					files = append(files, entry)
 				}
-				files = append(files, entry)
 			}
-		}
-		// the oplog is special and should be the only non directory file in the base of the archive
-		if baseEntry.Name() == "oplog.bson" {
+
+		case baseEntry.Name() == "oplog.bson":
+			// the oplog is special and should be the only non directory file in the base of the archive
 			files = append(files, baseEntry)
 		}
 	}
 	return files, nil
 }
 
-func (files *PreludeFiles) PrintFiles() {
-	for _, file := range *files {
+func (pf *PreludeFiles) PrintFiles() {
+	for _, file := range *pf {
 		log.Logv(log.Always, file.Path())
 	}
 }
 
 // create an intent from each file from the archive that is provided
-func (mongoarchive *MongoArchive) CreateIntents(files PreludeFiles) error {
-	mongoarchive.Archive.Demux = archive.CreateDemux(mongoarchive.Archive.Prelude.NamespaceMetadatas, mongoarchive.Archive.In)
+func (a *Archive) CreateIntents(files PreludeFiles) error {
+	a.Reader.Demux = archive.CreateDemux(a.Reader.Prelude.NamespaceMetadatas, a.Reader.In)
 
 	for _, file := range files {
-		err := mongoarchive.createIntent(file)
-		if err != nil {
+		if err := a.createIntent(file); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }

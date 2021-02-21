@@ -1,17 +1,18 @@
 package mongoarchivereader
 
 import (
-	"fmt"
+	"io/ioutil"
+	"path/filepath"
+
 	"github.com/mongodb/mongo-tools-common/archive"
 	"github.com/mongodb/mongo-tools-common/intents"
 	"github.com/mongodb/mongo-tools-common/log"
-	"io"
-	"io/ioutil"
-	"path/filepath"
+	"github.com/pkg/errors"
+	"gophers.dev/pkgs/ignore"
 )
 
-// create intent from metadata in archive and store it in MongoArchive.Manager
-func (mongoarchive *MongoArchive) processMetadata(sourceNS namespace, file archive.DirLike) {
+// create intent from metadata in archive and store it in Archive.Manager
+func (a *Archive) processMetadata(sourceNS namespace, file archive.DirLike) {
 	intent := &intents.Intent{
 		DB: sourceNS.DB,
 		C:  sourceNS.Collection,
@@ -19,47 +20,41 @@ func (mongoarchive *MongoArchive) processMetadata(sourceNS namespace, file archi
 	intent.MetadataFile = &archive.MetadataPreludeFile{
 		Origin:  sourceNS.String(),
 		Intent:  intent,
-		Prelude: mongoarchive.Archive.Prelude,
+		Prelude: a.Reader.Prelude,
 	}
 
-	intent.MetadataLocation = filepath.Join(mongoarchive.Options.Out, file.Path())
-	mongoarchive.Manager.PutWithNamespace(sourceNS.String(), intent)
+	intent.MetadataLocation = filepath.Join(a.Options.Out, file.Path())
+	a.Manager.PutWithNamespace(sourceNS.String(), intent)
 }
 
 // read the json metadata from the archive and write it to disk
-func (mongoarchive *MongoArchive) restoreMetadata(intent *intents.Intent) error {
-	err := intent.MetadataFile.Open()
-	if err != nil {
-		return fmt.Errorf("couldn't open metadata intent `%s`: %v", intent.Namespace(), err)
+func (a *Archive) restoreMetadata(intent *intents.Intent) error {
+	if err := intent.MetadataFile.Open(); err != nil {
+		return errors.Wrapf(err, "failed to open metadata intent %q", intent.Namespace())
 	}
-	defer func() { _ = intent.MetadataFile.Close() }()
+	defer ignore.Close(intent.MetadataFile)
 
-	log.Logvf(log.DebugLow, "reading metadata for `%s` from archive", intent.Namespace())
+	log.Logvf(log.DebugLow, "reading metadata for %q from archive", intent.Namespace())
+
+	// TODO: lets see if we can use io.Copy to avoid reading everything into memory
 
 	jsonBytes, err := ioutil.ReadAll(intent.MetadataFile)
 	if err != nil {
-		return fmt.Errorf("error reading metadata from `%s`: %v", intent.Namespace(), err)
+		return errors.Wrapf(err, "failed to read metadata from %q", intent.Namespace())
 	}
 
-	fileWriter := &restoreFile{path: mongoarchive.outputPath(intent.DB, intent.C) + ".metadata.json"}
+	fileWriter := &restoreFile{path: a.outputPath(intent.DB, intent.C) + ".metadata.json"}
 
-	err = fileWriter.Open()
-	if err != nil {
-		return fmt.Errorf("couldn't open metadata file `%s` for writing: %v", fileWriter.path, err)
+	if err := fileWriter.Open(); err != nil {
+		return errors.Wrapf(err, "failed to open metadata file %q", fileWriter.path)
 	}
-	defer func() {
-		closeErr := fileWriter.Close()
-		if err == nil && closeErr != nil {
-			err = fmt.Errorf("error writing metadata for collection `%v` to disk: %v", intent.Namespace(), closeErr)
-		}
-	}()
+	defer ignore.Close(fileWriter)
 
-	log.Logvf(log.Info, "restoring `%s` to `%s`", intent.Namespace(), fileWriter.path)
-	var f io.Writer
-	f = fileWriter
-	_, err = f.Write(jsonBytes)
-	if err != nil {
-		return fmt.Errorf("error writing metadata for collection `%s` to disk: %v", intent.Namespace(), err)
+	log.Logvf(log.Info, "restoring %q to %q", intent.Namespace(), fileWriter.path)
+
+	if _, err = fileWriter.Write(jsonBytes); err != nil {
+		return errors.Wrapf(err, "failed to write metadata for collection %q", intent.Namespace())
 	}
+
 	return nil
 }

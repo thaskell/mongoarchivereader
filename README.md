@@ -1,10 +1,18 @@
-mongoarchivereader
-==================
-Takes a mongo archive, created from mongodump with the --archive flag, and either lists the contents of the archive or dumps the content of the archive to files. The result is a dump directory which should contain the same content as if mongodump was executed with the --out flag.
+# mongoarchivereader
 
-Attemping to somewhat follow with https://github.com/mongodb/mongo-tools/ so the flags should work as expected for people familiar with the mongo-tools.
+Takes a mongo archive, created from mongodump with the `--archive` flag, and either
+lists the contents of the archive or dumps the content of the archive to files.
+The result is a dump directory which should contain the same content as if mongodump
+was executed with the `--out` flag.
 
-Wrote this to help debug a mongorestore problem by allowing the comparison of the contents of an archive which was able to restore and the content of an archive that was producing errors during the restore process. The --list option is also useful for viewing the databases and collections contained within the archive without needing an actual mongod instance to do a mongorestore --dryRun against.
+Attempting to somewhat follow with https://github.com/mongodb/mongo-tools/ so the
+flags should work as expected for people familiar with the mongo-tools.
+
+Wrote this to help debug a mongorestore problem by allowing the comparison of the
+contents of an archive which was able to restore and the content of an archive that
+was producing errors during the restore process. The `--list` option is also useful
+for viewing the databases and collections contained within the archive without
+needing an actual `mongod` instance to do a `mongorestore --dryRun` against.
 
 ```
 $ ./mongoarchivereader --help
@@ -29,8 +37,8 @@ tool specific options:
       --list                    list contents of archive instead of reconstructing it
 ```
 
-Example Usages
---------------
+## Example Usages
+
 List content of archive:
 ```
 $ ./mongoarchivereader --archive=/home/thaskell/mongodumparchive.gz --gzip --list
@@ -109,13 +117,18 @@ $ bsondump /home/thaskell/mongodumparchive.gz.dump/oplog.bson 2> /dev/null | jq 
 }
 ```
 
-Build
-=====
-Install go 1.15
+## Install
+
+```bash
+$ go get github.com/thaskell/mongoarchivereader
 ```
-$ mkdir -p $GOPATH/src/github.com
-$ cd $GOPATH/src/github.com
+
+## Build
+
+Requires Go 1.16
+
+```bash
 $ git clone git@github.com:thaskell/mongoarchivereader.git
-$ cd mongoarchivereader
-$ go build main/mongoarchivereader.go
+$ cd mongoarchivereader/cmd/mongo-archive-reader
+$ go build
 ```

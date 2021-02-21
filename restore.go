@@ -2,6 +2,7 @@ package mongoarchivereader
 
 import (
 	"fmt"
+
 	"github.com/mongodb/mongo-tools-common/db"
 	"github.com/mongodb/mongo-tools-common/intents"
 	"github.com/mongodb/mongo-tools-common/log"
@@ -9,18 +10,18 @@ import (
 	"github.com/mongodb/mongo-tools/mongorestore"
 )
 
-// Setup the demux and then restore all the intents that have been added to the MongoArchive.Manager.
-func (mongoarchive *MongoArchive) ProcessIntents() mongorestore.Result {
+// Setup the demux and then restore all the intents that have been added to the Archive.Manager.
+func (a *Archive) ProcessIntents() mongorestore.Result {
 	// demux code taken from https://github.com/mongodb/mongo-tools/blob/100.2.1/mongorestore/mongorestore.go#L482-L524
 	demuxFinished := make(chan interface{})
 	var demuxErr error
 	namespaceChan := make(chan string, 1)
 	namespaceErrorChan := make(chan error)
-	mongoarchive.Archive.Demux.NamespaceChan = namespaceChan
-	mongoarchive.Archive.Demux.NamespaceErrorChan = namespaceErrorChan
+	a.Reader.Demux.NamespaceChan = namespaceChan
+	a.Reader.Demux.NamespaceErrorChan = namespaceErrorChan
 
 	go func() {
-		demuxErr = mongoarchive.Archive.Demux.Run()
+		demuxErr = a.Reader.Demux.Run()
 		close(demuxFinished)
 	}()
 	// consume the new namespace announcement from the demux for all of the special collections
@@ -34,7 +35,7 @@ func (mongoarchive *MongoArchive) ProcessIntents() mongorestore.Result {
 		if !ok {
 			break
 		}
-		intent := mongoarchive.Manager.IntentForNamespace(ns)
+		intent := a.Manager.IntentForNamespace(ns)
 		if intent == nil {
 			return mongorestore.Result{Err: fmt.Errorf("no intent for collection in archive: %v", ns)}
 		}
@@ -51,9 +52,9 @@ func (mongoarchive *MongoArchive) ProcessIntents() mongorestore.Result {
 		}
 	}
 
-	mongoarchive.Manager.UsePrioritizer(mongoarchive.Archive.Demux.NewPrioritizer(mongoarchive.Manager))
-	result := mongoarchive.RestoreIntents()
-	combineResults(&result, mongoarchive.RestoreSpecialIntents())
+	a.Manager.UsePrioritizer(a.Reader.Demux.NewPrioritizer(a.Manager))
+	result := a.RestoreIntents()
+	combineResults(&result, a.RestoreSpecialIntents())
 
 	<-demuxFinished
 	return resultWithError(result, demuxErr)
@@ -76,12 +77,12 @@ func resultWithError(result mongorestore.Result, err error) mongorestore.Result 
 	return result
 }
 
-// restore each of the normal intents stored on MongoArchive.Manager
-func (mongoarchive *MongoArchive) RestoreIntents() mongorestore.Result {
+// restore each of the normal intents stored on Archive.Manager
+func (a *Archive) RestoreIntents() mongorestore.Result {
 	var totalResult mongorestore.Result
 	var ioBuf []byte
 	for {
-		intent := mongoarchive.Manager.Pop()
+		intent := a.Manager.Pop()
 		if intent == nil {
 			break
 		}
@@ -91,10 +92,10 @@ func (mongoarchive *MongoArchive) RestoreIntents() mongorestore.Result {
 			}
 			fileNeedsIOBuffer.TakeIOBuffer(ioBuf)
 		}
-		result := mongoarchive.RestoreIntent(intent)
+		result := a.RestoreIntent(intent)
 		logRestore(result, intent.Namespace())
 		combineResults(&totalResult, result)
-		mongoarchive.Manager.Finish(intent)
+		a.Manager.Finish(intent)
 		if fileNeedsIOBuffer, ok := intent.BSONFile.(intents.FileNeedsIOBuffer); ok {
 			fileNeedsIOBuffer.ReleaseIOBuffer()
 		}
@@ -103,18 +104,17 @@ func (mongoarchive *MongoArchive) RestoreIntents() mongorestore.Result {
 	return totalResult
 }
 
-func (mongoarchive *MongoArchive) RestoreIntent(intent *intents.Intent) mongorestore.Result {
+func (a *Archive) RestoreIntent(intent *intents.Intent) mongorestore.Result {
 	var result mongorestore.Result
 	if intent.MetadataFile != nil {
-		err := mongoarchive.restoreMetadata(intent)
-		if err != nil {
+		if err := a.restoreMetadata(intent); err != nil {
 			return resultWithError(result, err)
 		}
-		log.Logvf(log.Always, "finished restoring metadata for %s", intent.Namespace())
+		log.Logvf(log.Always, "finished restoring metadata for %q", intent.Namespace())
 	}
 
 	if intent.BSONFile != nil {
-		return mongoarchive.restoreBSON(intent)
+		return a.restoreBSON(intent)
 	}
 
 	log.Logvf(log.DebugLow, "intent was neither a metadatafile or bsonfile which is unexpected: %+v", intent)
@@ -123,26 +123,26 @@ func (mongoarchive *MongoArchive) RestoreIntent(intent *intents.Intent) mongores
 
 type specialIntents map[string]*intents.Intent
 
-func (mongoarchive *MongoArchive) getSpecialIntents() specialIntents {
+func (a *Archive) getSpecialIntents() specialIntents {
 	si := make(specialIntents)
-	si["users"] = mongoarchive.Manager.Users()
-	si["roles"] = mongoarchive.Manager.Roles()
-	si["authversion"] = mongoarchive.Manager.AuthVersion()
-	si["oplog"] = mongoarchive.Manager.Oplog()
+	si["users"] = a.Manager.Users()
+	si["roles"] = a.Manager.Roles()
+	si["authversion"] = a.Manager.AuthVersion()
+	si["oplog"] = a.Manager.Oplog()
 
 	return si
 }
 
 // MongoArchiver.Manager has special intents stored separately since they are supposed to be restored
 // in different ways. Because our output is a file we can process these all the same way
-func (mongoarchive *MongoArchive) RestoreSpecialIntents() mongorestore.Result {
-	si := mongoarchive.getSpecialIntents()
+func (a *Archive) RestoreSpecialIntents() mongorestore.Result {
+	si := a.getSpecialIntents()
 	var totalResult mongorestore.Result
 
 	var ioBuf []byte
 	for name, intent := range si {
 		if intent == nil {
-			log.Logvf(log.DebugLow, "no intent found for %s, must not have been in the archive, skipping", name)
+			log.Logvf(log.DebugLow, "no intent found for %q, must not have been in the archive, skipping", name)
 			continue
 		}
 		if fileNeedsIOBuffer, ok := intent.BSONFile.(intents.FileNeedsIOBuffer); ok {
@@ -151,7 +151,7 @@ func (mongoarchive *MongoArchive) RestoreSpecialIntents() mongorestore.Result {
 			}
 			fileNeedsIOBuffer.TakeIOBuffer(ioBuf)
 		}
-		result := mongoarchive.restoreBSON(intent)
+		result := a.restoreBSON(intent)
 		logRestore(result, intent.Namespace())
 		combineResults(&totalResult, result)
 		if fileNeedsIOBuffer, ok := intent.BSONFile.(intents.FileNeedsIOBuffer); ok {
