@@ -40,7 +40,7 @@ func main() {
 	// if we are not just listing the contents of the archive we need to make sure
 	// the expected output directory doesn't exist or we might overwrite data in it
 	if !opts.List {
-		if _, err := os.Stat(opts.Out); err != nil {
+		if _, err := os.Stat(opts.Out); err == nil {
 			log.Logvf(log.Always, "--out location of `%s` already exists, refusing to overwrite", opts.Out)
 			os.Exit(util.ExitFailure)
 		}

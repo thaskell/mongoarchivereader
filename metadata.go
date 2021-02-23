@@ -28,7 +28,7 @@ func (a *Archive) processMetadata(sourceNS namespace, file archive.DirLike) {
 }
 
 // read the json metadata from the archive and write it to disk
-func (a *Archive) restoreMetadata(intent *intents.Intent) error {
+func (a *Archive) restoreMetadata(intent *intents.Intent) (e error) {
 	if err := intent.MetadataFile.Open(); err != nil {
 		return errors.Wrapf(err, "failed to open metadata intent %q", intent.Namespace())
 	}
@@ -48,7 +48,11 @@ func (a *Archive) restoreMetadata(intent *intents.Intent) error {
 	if err := fileWriter.Open(); err != nil {
 		return errors.Wrapf(err, "failed to open metadata file %q", fileWriter.path)
 	}
-	defer ignore.Close(fileWriter)
+	defer func(ns string) {
+		if err := fileWriter.Close(); err != nil {
+			e = errors.Wrapf(err, "error writing metadata for collection %q to disk", ns)
+		}
+	}(intent.Namespace())
 
 	log.Logvf(log.Info, "restoring %q to %q", intent.Namespace(), fileWriter.path)
 
